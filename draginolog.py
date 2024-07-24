@@ -2,9 +2,9 @@
 import argparse
 import csv
 import os
-import sys
-import subprocess
 import signal
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
@@ -157,8 +157,11 @@ def show_current_values(ser):
     ser.write(("AT+DADDR=?" + '\r\n').encode())
     time.sleep(0.1)
     device_address = ser.readline().decode().strip()
-    print(f"Device address={device_address}")
-    print(f"Interval=", end="")
+    print(f"Device address = {device_address}")
+    eui = ''.join(send_command(ser, "AT+DEUI=?", 0.2, quiet=True))
+    print("\033[1A")
+    print(f"Device EUI = {eui.replace(' ', '')}", end='\r', flush=True)
+    print(f"\nInterval = ", end="")
     send_command(ser, "AT+TDC=?", 0.2, quiet=True)
     print("ms\n", end="")
     send_command(ser, f"AT+GETSENSORVALUE=0", 0.2, quiet=True)
@@ -295,7 +298,7 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
         for cmd in commands:
             send_command(ser, cmd)
 
-        print(f"\n---   \n\nThe LHT65N-E5 will now log data every {interval}s, starting when you long press(ed) ACT until green blinking. To stop an ongoing mission, short press ACT 5 times. A long press until green blinking will restart a mission from that time.")
+        print(f"\n---   \n\nThe LHT65N-E5 will now log data every {interval}s, starting when you long press(ed) ACT until green blinking. To stop an ongoing mission, press short press ACT 5 times. A long press until green blinking will restart a mission from that time.")
 
 if __name__ == "__main__":
     # Prompt user for serial device and baud rate
