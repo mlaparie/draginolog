@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime, timedelta
 
 try:
@@ -184,8 +185,16 @@ def fetch_logger_entries(ser, entries):
     print(message, end="", flush=True)  # Print the initial message without a newline
 
     start_time = time.time()  # Record the start time
+    times = deque(maxlen=50)  # Store times for the last 50 entries to calculate a moving average
+    smoothed_eta = None  # Initialize smoothed ETA
+
+    warmup_phase = entries // 10  # Warm-up phase is 10% of total entries
+
+    last_length = 0  # Track the length of the previous message for clearing
 
     for line_num in range(entries):
+        entry_start = time.time()  # Record the time at the start of processing this line
+
         # Read each line and append it to logger_data
         if ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
@@ -193,19 +202,40 @@ def fetch_logger_entries(ser, entries):
         else:
             time.sleep(0.05)  # Allow time for data to arrive
 
+        # Record the time for this entry
+        times.append(time.time() - entry_start)
+
         # Update and display progress and ETA
         progress = ((line_num + 1) / entries) * 100
-        elapsed_time = time.time() - start_time
-        average_time_per_entry = elapsed_time / (line_num + 1)  # Average time per completed line
-        remaining_time = average_time_per_entry * (entries - (line_num + 1))
 
-        # Format remaining time into minutes and seconds
-        remaining_minutes, remaining_seconds = divmod(int(remaining_time), 60)
+        if line_num + 1 > warmup_phase:  # Start showing ETA after the warm-up phase
+            # Use a combined moving and cumulative average for ETA
+            cumulative_avg_time = (time.time() - start_time) / (line_num + 1)
+            smoothed_avg_time = sum(times) / len(times)
+            average_time_per_entry = (cumulative_avg_time + smoothed_avg_time) / 2
 
-        sys.stdout.write(
-            f"\r{message} [{progress:.2f}% complete, ETA: {remaining_minutes}m {remaining_seconds}s]"
-        )
+            # Calculate remaining time and smooth ETA
+            remaining_time = average_time_per_entry * (entries - (line_num + 1))
+            if smoothed_eta is None:
+                smoothed_eta = remaining_time  # Initialize smoothed ETA
+            else:
+                # Apply a smoothing factor (e.g., 0.9 for slow adjustments)
+                smoothing_factor = 0.9
+                smoothed_eta = smoothing_factor * smoothed_eta + (1 - smoothing_factor) * remaining_time
+
+            # Format remaining time into minutes and seconds
+            remaining_minutes, remaining_seconds = divmod(int(smoothed_eta), 60)
+
+            output = f"{message} [{progress:.2f}% complete, ETA: {remaining_minutes}m {remaining_seconds}s]"
+        else:
+            # Show progress with "computing ETA" during the warm-up phase
+            output = f"{message} [{progress:.2f}% complete, computing ETA…]"
+
+        # Clear previous message by overwriting with spaces if shorter
+        sys.stdout.write("\r" + output + " " * (last_length - len(output)))
         sys.stdout.flush()
+
+        last_length = len(output)  # Update the length of the current message
 
     print("\n\033[K", end="")  # Clear the line after completion
     
