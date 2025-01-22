@@ -66,7 +66,7 @@ def export_to_csv(datalogger_entries, filename, num_entries=None, action=None):
 
     print("\033[K", end="")  # Clear the line before printing the final message
     print(f"Data {'saved' if mode == 'w' else 'appended'} to {full_path}")
-    
+
 def process_datalogger_entries(entries):
     processed_entries = []
     for entry in entries[:-1]:  # Skip the last lines
@@ -80,7 +80,7 @@ def process_datalogger_entries(entries):
                 processed_parts.append(part.strip())
         processed_entries.append(','.join(processed_parts))
     return processed_entries
-
+    
 def send_password(ser, password="123456", answer_wait_time=0.1, next_command_wait_time=0.5):
     print(f"\nSending password: {password}")
     ser.write((password + '\r\n').encode())
@@ -175,13 +175,46 @@ def show_logger(ser):
     print("")
     send_command(ser, f"AT+PLDTA={entries}", int(entries) / 400)
     
-def fetch_logger_entries(ser, entries=None):
-    logger_data = send_command(ser, f"AT+PLDTA={entries}", int(entries) / 400, quiet=True)
+def fetch_logger_entries(ser, entries):
+    logger_data = []
+    command = f"AT+PLDTA={entries}"
+    ser.write((command + '\r\n').encode())
+
+    message = f"Fetching the last {entries} datalogger entries..."
+    print(message, end="", flush=True)  # Print the initial message without a newline
+
+    start_time = time.time()  # Record the start time
+
+    for line_num in range(entries):
+        # Read each line and append it to logger_data
+        if ser.in_waiting:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            logger_data.append(line)
+        else:
+            time.sleep(0.05)  # Allow time for data to arrive
+
+        # Update and display progress and ETA
+        progress = ((line_num + 1) / entries) * 100
+        elapsed_time = time.time() - start_time
+        average_time_per_entry = elapsed_time / (line_num + 1)  # Average time per completed line
+        remaining_time = average_time_per_entry * (entries - (line_num + 1))
+
+        # Format remaining time into minutes and seconds
+        remaining_minutes, remaining_seconds = divmod(int(remaining_time), 60)
+
+        sys.stdout.write(
+            f"\r{message} [{progress:.2f}% complete, ETA: {remaining_minutes}m {remaining_seconds}s]"
+        )
+        sys.stdout.flush()
+
+    print("\n\033[K", end="")  # Clear the line after completion
+    
+    # Process the logger data to remove unwanted portions (trimming logic)
     trimmed_logger_data = []
-    # Find the last occurrence of '\n\r' and slice the string from that point forward
     for item in logger_data:
         last_occurrence_index = item.rfind('\n\r') + 2  # +2 to move past '\n\r'
         trimmed_logger_data.append(item[last_occurrence_index:])
+
     return trimmed_logger_data
 
 def read_boot_response(ser, password, keyword="Dragino", lines_after_keyword=5  ):
@@ -302,13 +335,18 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
 
 if __name__ == "__main__":
     # Prompt user for serial device and baud rate
-    print("""This script will unlock a LHT65N-E5 to show log data and, optionally, resynchronize the clock and reconfigure the logging interval. A device configured in advance should be kept in deep sleep (5 short presses on ACT if device was activated) and reactivated with a long press only when relevant (e.g., at a round hour).
+    if args.export is None:
+        message = "This script will unlock a Dragino LHT65N-E5 to show log data and, optionally, resynchronize the clock and reconfigure the recording interval. A device configured in advance for a future mission should be kept in deep sleep (5 short presses on ACT if a mission was already running) and reactivated when relevant with a long press on ACT (e.g., at a round hour)."
+    else:
+        message = "Export mode: this action will unlock a Dragino LHT65N-E5 and export its datalogger entries into a csv file."
+        
+    print(f"""\033[34m{message}\033[0m
 
-The operation requires a FTDI adapter and a Dragino E2 cable wired as follows:
+\033[90mThe operation requires a FTDI adapter and a Dragino E2 cable wired as follows:
 - E2 white (port 4) to FTDI RX
 - E2 green (port 5) to FTDI TX
 - E2 black (port 9) to FTDI GND
-- E2 cable plugged on the external sensor port of the LHT65N-E5
+- E2 cable plugged on the external sensor port of the LHT65N-E5\033[0m
 """)
     serial_device = input(">_ Enter serial device (default: /dev/ttyUSB0): ") or '/dev/ttyUSB0'
     baud_rate = input(">_ Enter baud rate (default: 9600): ") or '9600'
