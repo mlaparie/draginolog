@@ -303,10 +303,14 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
             # Now check if it was provided without a specific number (args.export would be 100, the const value)
             if args.export == 100:
                 # Prompt the user to confirm or enter a new number for NUM
-                user_input = input("\n>_ Enter the number of datalogger entries to export (default: 100): ")
+                user_input = input("\n>_ Enter the number of datalogger entries to export (default: 100, max: 3228): ")
                 if user_input:  # If the user entered a value
                     try:
                         entries_to_export = int(user_input)
+                        # Check if the value exceeds the maximum allowed value
+                        if entries_to_export > 3228:
+                            print("Export size too high, changed to the maximal datalogger export value: 3228.")
+                            entries_to_export = 3228
                         spacer = ""
                     except ValueError:
                         print("Invalid number. Using default of 100 entries.")
@@ -317,6 +321,10 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
                     spacer = ""
             else:
                 # args.export is a user-specified value, so use it directly
+                # Check if the value exceeds the maximum allowed value
+                if args.export > 3228:
+                    print("\nExport size too high, changed to the maximal datalogger export value: 3228.")
+                    args.export = 3228
                 entries_to_export = args.export
                 spacer = "\n"
 
