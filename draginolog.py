@@ -10,6 +10,9 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 
+# Version number
+VERSION = "1.2.0"
+
 try:
     import serial
 except ImportError:
@@ -19,6 +22,8 @@ except ImportError:
 # Argument parsing
 parser = argparse.ArgumentParser(description="Datalogger and configuration tool for Dragino LHT65N-E5.")
 parser.add_argument("-E", "--export", metavar="NUM", nargs='?', const=100, type=int, help="Export the last NUM datalogger entries to a CSV file and exit. Default is 100 if not specified.")
+parser.add_argument("-C", "--clear", action="store_true", help="Clear the datalogger memory.")
+parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {VERSION}", help="Show the script version and exit.")
 args = parser.parse_args()
 
 global ser  # Declare `ser` as a global variable
@@ -43,8 +48,6 @@ def check_file_and_get_action(filename):
             return 'cancel'
     else:
         return 'create'
-
-import os
 
 def export_to_csv(datalogger_entries, filename, num_entries=None, action=None):
     # Ensure the directory exists (create it if it doesn't)
@@ -286,6 +289,12 @@ def read_boot_response(ser, password, keyword="Dragino", lines_after_keyword=5  
         time.sleep(6)
         ser.write((password + '\r\n').encode()) # Unlock after boot
         time.sleep(3)  # Give some time for the device to process the command
+
+def confirm_clear():
+    """Prompt the user to confirm clearing the datalogger memory."""
+    print("\n\033[33m>_ Are you sure you want to clear the datalogger memory? [y/N]: \033[0m", end="")
+    response = input().lower()
+    return response == 'y'
             
 def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
     with serial.Serial(serial_device, baud_rate, timeout=1) as ser:
@@ -295,9 +304,7 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
 
         device_address = show_current_values(ser)
 
-
-
-       # Check if the export flag was provided
+        # Check if the export flag was provided
         if args.export is not None:
             # If args.export has a value (including the default const value), it means -E was used
             # Now check if it was provided without a specific number (args.export would be 100, the const value)
@@ -338,9 +345,29 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
 
             trimmed_logger_data = fetch_logger_entries(ser, entries=entries_to_export)
             export_to_csv(trimmed_logger_data, filename, num_entries=int(entries_to_export), action=action)
+
+            # If --clear is also provided, clear the data after exporting
+            if args.clear:
+                if confirm_clear():
+                    print("\nClearing datalogger memory…")
+                    send_command(ser, "AT+CLRDTA")
+                    print("Datalogger memory cleared.")
+                else:
+                    print("Clear operation cancelled.")
             sys.exit(0)
-        else:
-            show_logger(ser)
+
+        # If only --clear is provided
+        if args.clear:
+            if confirm_clear():
+                print("\nClearing datalogger memory…")
+                send_command(ser, "AT+CLRDTA")
+                print("Datalogger memory cleared.")
+            else:
+                print("Clear operation cancelled.")
+            sys.exit(0)
+
+        # If neither --export nor --clear is provided, proceed with normal operation
+        show_logger(ser)
 
         interval = input("\n>_ Press C-c to exit without reconfiguring, or set a logging interval in seconds to continue (default: 3600): ") or "3600"
         interval_milliseconds = int(interval) * 1000
@@ -373,10 +400,14 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
 
 if __name__ == "__main__":
     # Prompt user for serial device and baud rate
-    if args.export is None:
+    if args.export is None and not args.clear:
         message = "This script will unlock a Dragino LHT65N-E5 to show log data and, optionally, resynchronize the clock and reconfigure the recording interval. A device configured in advance for a future mission should be kept in deep sleep (5 short presses on ACT if a mission was already running) and reactivated when relevant with a long press on ACT (e.g., at a round hour)."
-    else:
+    elif args.export is not None and not args.clear:
         message = "Export mode: this action will unlock a Dragino LHT65N-E5 and export its datalogger entries into a csv file."
+    elif args.clear and not args.export:
+        message = "Clear mode: this action will unlock a Dragino LHT65N-E5 and clear its datalogger memory."
+    elif args.export is not None and args.clear:
+        message = "Export and clear mode: this action will unlock a Dragino LHT65N-E5, export its datalogger entries into a csv file, and then clear the datalogger memory."
         
     print(f"""\033[34m{message}\033[0m
 
