@@ -396,7 +396,7 @@ def main(serial_device='/dev/ttyUSB0', baud_rate=9600):
         for cmd in commands:
             send_command(ser, cmd)
 
-        print(f"\n---   \n\nThe LHT65N-E5 will now log data every {interval}s, starting when you long press(ed) ACT until green blinking. To stop an ongoing mission, press short press ACT 5 times. A long press until green blinking will restart a mission from that time.")
+        print(f"\n---   \n\nThe LHT65N-E5 will now log data every {interval}s, starting when you long press(ed) ACT until green blinking. To stop an ongoing mission, short press ACT 5 times. A long press until green blinking will restart a mission from that time.")
 
 if __name__ == "__main__":
     # Prompt user for serial device and baud rate
