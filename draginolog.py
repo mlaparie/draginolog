@@ -11,7 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta
 
 # Version number
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 try:
     import serial
@@ -73,18 +73,37 @@ def export_to_csv(datalogger_entries, filename, num_entries=None, action=None):
 
 def process_datalogger_entries(entries):
     processed_entries = []
-    for entry in entries[:-1]:  # Skip the last lines
+    for entry in entries:
+        # Skip lines that are too short (less than 5 characters, e.g., "0200 ")
+        if len(entry) <= 5:
+            continue
+        
+        # Skip lines that contain metadata (e.g., "top Tx events when read sensor data")
+        if any(word in entry for word in ["top", "Tx", "events", "when", "read", "sensor", "data"]):
+            continue
+        
+        # Split the entry into parts and process each part
         parts = entry.split(' ')
         processed_parts = []
-        for part in parts:
-            key_value = part.split('=')
-            if len(key_value) == 2:
-                processed_parts.append(key_value[1].strip())
-            else:
+        for i, part in enumerate(parts):
+            # Skip empty parts
+            if not part:
+                continue
+            # Preserve the row number (first part) exactly as it appears
+            if i == 0:
                 processed_parts.append(part.strip())
-        processed_entries.append(','.join(processed_parts))
+            # If the part contains '=', treat it as a key-value pair
+            elif '=' in part:
+                key_value = part.split('=')
+                if len(key_value) == 2:
+                    processed_parts.append(key_value[1].strip())
+            else:
+                # Otherwise, treat it as a standalone value (e.g., date, time)
+                processed_parts.append(part.strip())
+        if processed_parts:  # Only add if there are valid parts
+            processed_entries.append(','.join(processed_parts))
     return processed_entries
-    
+
 def send_password(ser, password="123456", answer_wait_time=0.1, next_command_wait_time=0.5):
     print(f"\nSending password: {password}")
     ser.write((password + '\r\n').encode())
@@ -184,54 +203,37 @@ def fetch_logger_entries(ser, entries):
     command = f"AT+PLDTA={entries}"
     ser.write((command + '\r\n').encode())
 
-    message = f"Fetching the last {entries} datalogger entries..."
+    message = f"Fetching the last {entries} datalogger entries…"
     print(message, end="", flush=True)  # Print the initial message without a newline
 
     start_time = time.time()  # Record the start time
-    times = deque(maxlen=50)  # Store times for the last 50 entries to calculate a moving average
-    smoothed_eta = None  # Initialize smoothed ETA
-
-    warmup_phase = entries // 10  # Warm-up phase is 10% of total entries
 
     last_length = 0  # Track the length of the previous message for clearing
 
-    for line_num in range(entries):
-        entry_start = time.time()  # Record the time at the start of processing this line
-
-        # Read each line and append it to logger_data
+    # Read all data from the serial port
+    buffer = ''
+    while len(logger_data) < entries:
         if ser.in_waiting:
-            line = ser.readline().decode('utf-8', errors='ignore').strip()
-            logger_data.append(line)
-        else:
-            time.sleep(0.05)  # Allow time for data to arrive
+            data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+            buffer += data
 
-        # Record the time for this entry
-        times.append(time.time() - entry_start)
+            # Split buffer into lines
+            while '\n' in buffer:
+                line, buffer = buffer.split('\n', 1)
+                line = line.strip()
+                if line:  # Only append non-empty lines
+                    logger_data.append(line)
 
-        # Update and display progress and ETA
-        progress = ((line_num + 1) / entries) * 100
-
-        if line_num + 1 > warmup_phase:  # Start showing ETA after the warm-up phase
-            # Use a combined moving and cumulative average for ETA
-            cumulative_avg_time = (time.time() - start_time) / (line_num + 1)
-            smoothed_avg_time = sum(times) / len(times)
-            average_time_per_entry = (cumulative_avg_time + smoothed_avg_time) / 2
-
-            # Calculate remaining time and smooth ETA
-            remaining_time = average_time_per_entry * (entries - (line_num + 1))
-            if smoothed_eta is None:
-                smoothed_eta = remaining_time  # Initialize smoothed ETA
-            else:
-                # Apply a smoothing factor (e.g., 0.9 for slow adjustments)
-                smoothing_factor = 0.9
-                smoothed_eta = smoothing_factor * smoothed_eta + (1 - smoothing_factor) * remaining_time
-
+        # Update progress and ETA
+        progress = (len(logger_data) / entries) * 100
+        elapsed_time = time.time() - start_time
+        if progress > 0:  # Avoid division by zero
+            estimated_total_time = elapsed_time / (progress / 100)
+            remaining_time = estimated_total_time - elapsed_time
             # Format remaining time into minutes and seconds
-            remaining_minutes, remaining_seconds = divmod(int(smoothed_eta), 60)
-
+            remaining_minutes, remaining_seconds = divmod(int(remaining_time), 60)
             output = f"{message} [{progress:.2f}% complete, ETA: {remaining_minutes}m {remaining_seconds}s]"
         else:
-            # Show progress with "computing ETA" during the warm-up phase
             output = f"{message} [{progress:.2f}% complete, computing ETA…]"
 
         # Clear previous message by overwriting with spaces if shorter
@@ -242,13 +244,8 @@ def fetch_logger_entries(ser, entries):
 
     print("\n\033[K", end="")  # Clear the line after completion
     
-    # Process the logger data to remove unwanted portions (trimming logic)
-    trimmed_logger_data = []
-    for item in logger_data:
-        last_occurrence_index = item.rfind('\n\r') + 2  # +2 to move past '\n\r'
-        trimmed_logger_data.append(item[last_occurrence_index:])
-
-    return trimmed_logger_data
+    # Return the raw logger data without trimming
+    return logger_data
 
 def read_boot_response(ser, password, keyword="Dragino", lines_after_keyword=5  ):
     print("\n>_ Hold 'ACT' until green blinking to start logging immediately, or press Enter to postpone the mission.")
